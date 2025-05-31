@@ -1,8 +1,7 @@
 
-from alive import alive
+from keep_alive import keep_alive
 
 import discord
-import os
 from discord import app_commands
 from discord.ext import commands
 import aiosqlite
@@ -88,5 +87,6 @@ async def daily(interaction: discord.Interaction):
     await interaction.response.send_message("🎁 คุณได้รับ 100 ChillCoin จากโบนัสประจำวัน!")
 
 # เริ่มรันบอท
-alive()  # ใส่ไว้ก่อน bot.run()
-bot.run(os.getenv('TOKEN'))
+keep_alive()  # ใส่ไว้ก่อน bot.run()
+import os
+bot.run(os.getenv("DISCORD_TOKEN"))  # ✅ แบบนี้ถูกต้อง
