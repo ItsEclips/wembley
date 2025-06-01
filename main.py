@@ -46,6 +46,27 @@ async def ensure_user(user_id: int):
         await db.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
         await db.commit()
 
+@bot.event
+async def on_member_join(member):
+    async with aiosqlite.connect("bar.db") as db:
+        async with db.execute("SELECT channel_id, title, description, color FROM welcome_settings WHERE guild_id = ?", (member.guild.id,)) as cursor:
+            row = await cursor.fetchone()
+            if row is None:
+                return
+            channel_id, title, desc, color = row
+
+    channel = member.guild.get_channel(channel_id)
+    if channel:
+        embed = discord.Embed(
+            title=title,
+            description=desc.replace("{user}", member.mention).replace("{server}", member.guild.name),
+            color=color
+        )
+        embed.set_thumbnail(url=member.avatar.url if member.avatar else member.default_avatar.url)
+        embed.set_footer(text=f"ตอนนี้มี {member.guild.member_count} คนแล้ว!")
+
+        await channel.send(embed=embed)
+
 # /balance
 @tree.command(name="balance", description="ดูจำนวน ChillCoin ของคุณ")
 async def balance(interaction: discord.Interaction):
@@ -85,6 +106,51 @@ async def daily(interaction: discord.Interaction):
                          (now.isoformat(), interaction.user.id))
         await db.commit()
     await interaction.response.send_message("🎁 คุณได้รับ 100 ChillCoin จากโบนัสประจำวัน!")
+
+# /setwelcome
+@tree.command(name="setwelcome", description="ตั้งค่าข้อความต้อนรับ (เฉพาะแอดมิน)")
+@app_commands.describe(
+    channel="ช่องที่จะใช้ต้อนรับ",
+    title="หัวข้อข้อความ Embed",
+    description="รายละเอียดใน Embed",
+    color="สี Embed (ตัวเลขฐาน 10 หรือ HEX เช่น 0xffcc00)"
+)
+async def setwelcome(
+    interaction: discord.Interaction,
+    channel: discord.TextChannel,
+    title: str,
+    description: str,
+    color: str = "0x3498db"  # สีฟ้าอ่อนเริ่มต้น
+):
+    # จำกัดสิทธิ์เฉพาะแอดมิน
+    if not interaction.user.guild_permissions.manage_guild:
+        await interaction.response.send_message("❌ คุณไม่มีสิทธิ์ใช้คำสั่งนี้", ephemeral=True)
+        return
+
+    color_int = int(color, 16) if color.startswith("0x") else int(color)
+
+    async with aiosqlite.connect("bar.db") as db:
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS welcome_settings (
+                guild_id INTEGER PRIMARY KEY,
+                channel_id INTEGER,
+                title TEXT,
+                description TEXT,
+                color INTEGER
+            )
+        """)
+        await db.execute("""
+            INSERT INTO welcome_settings (guild_id, channel_id, title, description, color)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id) DO UPDATE SET
+                channel_id=excluded.channel_id,
+                title=excluded.title,
+                description=excluded.description,
+                color=excluded.color
+        """, (interaction.guild.id, channel.id, title, description, color_int))
+        await db.commit()
+
+    await interaction.response.send_message(f"✅ ตั้งค่าข้อความต้อนรับเรียบร้อยแล้วในช่อง {channel.mention}", ephemeral=True)
 
 # เริ่มรันบอท
 keep_alive()  # ใส่ไว้ก่อน bot.run()
