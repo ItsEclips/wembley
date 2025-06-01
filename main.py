@@ -24,6 +24,13 @@ async def on_ready():
                 last_daily TEXT
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS config (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        """)
+        await db.execute("INSERT OR IGNORE INTO config (key, value) VALUES ('currency', '💰')")
         await db.commit()
 
     # กำหนดสถานะ Watching
@@ -39,6 +46,12 @@ async def on_ready():
         type=discord.ActivityType.watching,
         name=guild_name
     ))
+
+async def get_currency() -> str:
+    async with aiosqlite.connect(DATABASE) as db:
+        async with db.execute("SELECT value FROM config WHERE key = 'currency'") as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else "💰"
 
 # ตรวจสอบว่าผู้เล่นมีข้อมูลหรือยัง
 async def ensure_user(user_id: int):
@@ -71,20 +84,40 @@ async def on_member_join(member):
 @tree.command(name="balance", description="ดูจำนวน ChillCoin ของคุณ")
 async def balance(interaction: discord.Interaction):
     await ensure_user(interaction.user.id)
+    currency = await get_currency()
     async with aiosqlite.connect(DATABASE) as db:
         async with db.execute("SELECT balance FROM users WHERE user_id = ?", (interaction.user.id,)) as cursor:
             row = await cursor.fetchone()
-            await interaction.response.send_message(f"💰 {interaction.user.display_name} มี {row[0]} ChillCoin", ephemeral=True)
+            await interaction.response.send_message(
+                f"💼 {interaction.user.display_name} มี {row[0]} {currency}", ephemeral=True)
 
 # /work
 @tree.command(name="work", description="ทำงานในบาร์เพื่อหาเงิน ChillCoin")
 async def work(interaction: discord.Interaction):
     await ensure_user(interaction.user.id)
-    earned = random.randint(15, 25)
+    currency = await get_currency()
+    now = datetime.utcnow()
+
     async with aiosqlite.connect(DATABASE) as db:
-        await db.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (earned, interaction.user.id))
+        async with db.execute("SELECT last_work FROM users WHERE user_id = ?", (interaction.user.id,)) as cursor:
+            row = await cursor.fetchone()
+            if row and row[0]:
+                last_time = datetime.fromisoformat(row[0])
+                if now - last_time < timedelta(seconds=30):
+                    remaining = 30 - int((now - last_time).total_seconds())
+                    await interaction.response.send_message(
+                        f"⏳ พักก่อนน้า... ใช้คำสั่งนี้ได้อีกใน {remaining} วินาที", ephemeral=True)
+                    return
+
+        earned = random.randint(15, 25)
+        await db.execute("""
+            UPDATE users
+            SET balance = balance + ?, last_work = ?
+            WHERE user_id = ?
+        """, (earned, now.isoformat(), interaction.user.id))
         await db.commit()
-    await interaction.response.send_message(f"🍹 คุณทำงานเป็น Bartender และได้ {earned} ChillCoin!")
+
+    await interaction.response.send_message(f"🍹 คุณทำงานเป็น Bartender และได้ {earned} {currency}!")
 
 # /daily
 @tree.command(name="daily", description="รับ ChillCoin ฟรีวันละครั้ง")
@@ -151,6 +184,7 @@ async def setwelcome(
         await db.commit()
 
     await interaction.response.send_message(f"✅ ตั้งค่าข้อความต้อนรับเรียบร้อยแล้วในช่อง {channel.mention}", ephemeral=True)
+    
 # /addemoji
 @tree.command(name="addemoji", description="เพิ่มอีโมจิลงในเซิร์ฟเวอร์")
 @app_commands.describe(name="ชื่อของอีโมจิ", image="ไฟล์อีโมจิ (PNG/GIF)")
@@ -170,6 +204,15 @@ async def addemoji(interaction: discord.Interaction, name: str, image: discord.A
             f"✅ เพิ่มอีโมจิเรียบร้อย: `<:{emoji.name}:{emoji.id}>`", ephemeral=True)
     except discord.HTTPException as e:
         await interaction.response.send_message(f"❌ ล้มเหลว: {e}", ephemeral=True)
+# /setcurrency
+@tree.command(name="setcurrency", description="เปลี่ยนอีโมจิของสกุลเงิน (เฉพาะผู้ดูแล)")
+@app_commands.checks.has_permissions(administrator=True)
+@app_commands.describe(emoji="ใส่อีโมจิหรือ custom emoji ที่จะใช้เป็นสกุลเงิน")
+async def setcurrency(interaction: discord.Interaction, emoji: str):
+    async with aiosqlite.connect(DATABASE) as db:
+        await db.execute("UPDATE config SET value = ? WHERE key = 'currency'", (emoji,))
+        await db.commit()
+    await interaction.response.send_message(f"✅ เปลี่ยนสกุลเงินเป็น {emoji} เรียบร้อยแล้ว!")
 
 # เริ่มรันบอท
 keep_alive()  # ใส่ไว้ก่อน bot.run()
