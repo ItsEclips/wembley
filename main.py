@@ -151,6 +151,25 @@ async def setwelcome(
         await db.commit()
 
     await interaction.response.send_message(f"✅ ตั้งค่าข้อความต้อนรับเรียบร้อยแล้วในช่อง {channel.mention}", ephemeral=True)
+# /addemoji
+@tree.command(name="addemoji", description="เพิ่มอีโมจิลงในเซิร์ฟเวอร์")
+@app_commands.describe(name="ชื่อของอีโมจิ", image="ไฟล์อีโมจิ (PNG/GIF)")
+async def addemoji(interaction: discord.Interaction, name: str, image: discord.Attachment):
+    # ตรวจสอบ permission
+    if not interaction.user.guild_permissions.manage_emojis_and_stickers:
+        await interaction.response.send_message("❌ คุณไม่มีสิทธิ์เพิ่มอีโมจิ", ephemeral=True)
+        return
+
+    # ดาวน์โหลดไฟล์
+    file_bytes = await image.read()
+    
+    # สร้างอีโมจิ
+    try:
+        emoji = await interaction.guild.create_custom_emoji(name=name, image=file_bytes)
+        await interaction.response.send_message(
+            f"✅ เพิ่มอีโมจิเรียบร้อย: `<:{emoji.name}:{emoji.id}>`", ephemeral=True)
+    except discord.HTTPException as e:
+        await interaction.response.send_message(f"❌ ล้มเหลว: {e}", ephemeral=True)
 
 # เริ่มรันบอท
 keep_alive()  # ใส่ไว้ก่อน bot.run()
